@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Food POS - Realtime</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial;background:#f4f5f7;color:#222}header{background:#202124;color:#fff;padding:13px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px}header h1{margin:0;font-size:20px}.wrap{max-width:1250px;margin:auto;padding:14px;display:grid;grid-template-columns:1.4fr 1fr;gap:14px}.card{background:#fff;border-radius:12px;padding:14px;box-shadow:0 2px 10px #0001}.full{grid-column:1/-1}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:9px}.item{padding:13px;text-align:left;background:#fafafa;border:1px solid #ddd;border-radius:9px;cursor:pointer}.item b{display:block;margin-bottom:7px}.price{color:#555}.cats{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}.cats button,button{border:0;border-radius:8px;padding:9px 12px;font-weight:600;cursor:pointer}.cat{background:#eee}.active{background:#222;color:#fff}.row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;padding:9px 0}.qty button{padding:4px 8px;background:#eee}.total{font-size:21px;font-weight:700;padding:13px 0}.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.blue{background:#1976d2;color:#fff}.green{background:#16833b;color:#fff}.orange{background:#e88900;color:#fff}.red{background:#c62828;color:#fff}select,input{width:100%;padding:9px;border:1px solid #ccc;border-radius:8px;margin:5px 0 10px}.ticket{border:1px solid #ddd;border-radius:9px;padding:11px;margin:8px 0}.status{display:inline-block;padding:3px 7px;border-radius:12px;background:#eee}.hidden{display:none}.login{max-width:420px;margin:70px auto}.notice{padding:9px;border-radius:8px;background:#eef5ff;margin:8px 0}.ok{background:#eaf8ed}.err{background:#fff0f0}@media(max-width:800px){.wrap{grid-template-columns:1fr}.full{grid-column:auto}header{position:sticky;top:0;z-index:5}.grid{grid-template-columns:repeat(2,1fr)}}@media print{body *{visibility:hidden}.receipt,.receipt *{visibility:visible}.receipt{position:absolute;left:0;top:0;width:80mm}}
+</style></head><body>
+<header><h1>🍽️ Food POS</h1><div><span id="connection">Connecting…</span> <button onclick="logout()">Logout</button></div></header>
+
+<div id="login" class="card login">
+<h2>Staff Login</h2><p>Use your Supabase email and password.</p>
+<input id="email" type="email" placeholder="Email">
+<input id="password" type="password" placeholder="Password">
+<button class="blue" onclick="login()">Login</button>
+<button onclick="signup()">Create account</button>
+<div id="loginMsg"></div>
+</div>
+
+<main id="app" class="wrap hidden">
+<section class="card"><h2>Menu</h2><div class="cats" id="cats"></div><div class="grid" id="menu"></div></section>
+<section class="card"><h2>Current Order</h2><div id="cart"></div><div class="total">Total: ₹<span id="total">0.00</span></div>
+<label>Payment</label><select id="payment"><option>Cash</option><option>UPI</option><option>Card</option></select>
+<div class="actions"><button class="green" onclick="placeOrder()">🍳 Send to Kitchen</button><button class="blue" onclick="printBill()">🧾 Print Bill</button><button class="orange" onclick="completeOrder()">✅ Complete</button><button class="red" onclick="clearCart()">🗑️ Clear</button></div></section>
+
+<section class="card full"><h2>👨‍🍳 Live Kitchen Orders</h2><div id="orders"></div></section>
+<section class="card full"><h2>⚙️ Menu Management</h2><div class="actions"><button onclick="addMenu()">➕ Add Food Item</button><button onclick="loadMenu()">🔄 Refresh Menu</button></div></section>
+</main><div id="receipt" class="receipt"></div>
+
+<script src="config.js"></script>
+<script>
+const sb=supabase.createClient(window.SUPABASE_URL,window.SUPABASE_PUBLISHABLE_KEY);
+let menu=[],cart={},category="All",orders=[];
+const $=id=>document.getElementById(id);
+function msg(t,cls="notice"){ $("loginMsg").innerHTML='<div class="'+cls+'">'+t+'</div>'; }
+async function boot(){let {data:{session}}=await sb.auth.getSession(); if(session) showApp(); else $("login").classList.remove("hidden");
+sb.auth.onAuthStateChange((_e,s)=>{if(s)showApp();else{ $("app").classList.add("hidden");$("login").classList.remove("hidden");}});
+}
+async function login(){let {error}=await sb.auth.signInWithPassword({email:$("email").value,password:$("password").value});if(error)msg(error.message,"err")}
+async function signup(){let {error}=await sb.auth.signUp({email:$("email").value,password:$("password").value});if(error)msg(error.message,"err");else msg("Account created. If email confirmation is enabled, confirm the email, then log in.","ok")}
+async function logout(){await sb.auth.signOut()}
+async function showApp(){ $("login").classList.add("hidden");$("app").classList.remove("hidden");$("connection").textContent="🟢 Live";await loadMenu();await loadOrders();subscribe();}
+async function loadMenu(){let {data,error}=await sb.from("menu_items").select("*").eq("active",true).order("category").order("name");if(error)return alert(error.message);menu=data||[];renderMenu()}
+function renderMenu(){let cats=["All",...new Set(menu.map(x=>x.category))];$("cats").innerHTML=cats.map(c=>`<button class="cat ${c==category?"active":""}" onclick="category='${c}';renderMenu()">${c}</button>`).join("");let list=category=="All"?menu:menu.filter(x=>x.category==category);$("menu").innerHTML=list.map(x=>`<button class="item" onclick="add(${x.id})"><b>${x.name}</b><span class="price">₹${Number(x.price).toFixed(2)}</span></button>`).join("")}
+function add(id){cart[id]=(cart[id]||0)+1;renderCart()} function change(id,n){cart[id]=(cart[id]||0)+n;if(cart[id]<=0)delete cart[id];renderCart()}
+function renderCart(){let ids=Object.keys(cart);$("cart").innerHTML=ids.length?ids.map(id=>{let x=menu.find(a=>a.id==id);return `<div class="row"><span>${x.name}<br>₹${x.price} × ${cart[id]}</span><span class="qty"><button onclick="change(${id},-1)">−</button> <button onclick="change(${id},1)">+</button></span></div>`}).join(""):`<p style="color:#777">No items added.</p>`;$("total").textContent=cartTotal().toFixed(2)}
+function cartTotal(){return Object.entries(cart).reduce((s,[id,q])=>s+Number(menu.find(x=>x.id==id).price)*q,0)}
+async function placeOrder(){if(!Object.keys(cart).length)return alert("Add items first.");let {data:userData}=await sb.auth.getUser();let {data:o,error}=await sb.from("orders").insert({payment_method:$("payment").value,total:cartTotal(),created_by:userData.user.id,status:"new"}).select().single();if(error)return alert(error.message);let rows=Object.entries(cart).map(([id,q])=>{let x=menu.find(a=>a.id==id);return {order_id:o.id,item_id:x.id,item_name:x.name,price:x.price,quantity:q}});let r=await sb.from("order_items").insert(rows);if(r.error){await sb.from("orders").delete().eq("id",o.id);return alert(r.error.message)}clearCart();alert("Order #"+o.order_no+" sent to kitchen.");await loadOrders()}
+async function loadOrders(){let {data,error}=await sb.from("orders").select("*,order_items(*)").in("status",["new","preparing","ready"]).order("created_at",{ascending:false}).limit(50);if(error)return console.error(error);orders=data||[];renderOrders()}
+function renderOrders(){$("orders").innerHTML=orders.length?orders.map(o=>`<div class="ticket"><b>Order #${o.order_no}</b> · ${new Date(o.created_at).toLocaleTimeString()} · <span class="status">${o.status}</span><br>${(o.order_items||[]).map(i=>`${i.quantity} × ${i.item_name}`).join("<br>")}<br><b>Total ₹${Number(o.total).toFixed(2)}</b> · ${o.payment_method}<br><button onclick="setStatus(${o.id},'preparing')">Preparing</button> <button onclick="setStatus(${o.id},'ready')">Ready</button> <button onclick="setStatus(${o.id},'completed')">Complete</button></div>`).join(""):`<p style="color:#777">No open orders.</p>`}
+async function setStatus(id,status){let {error}=await sb.from("orders").update({status}).eq("id",id);if(error)alert(error.message);else await loadOrders()}
+function subscribe(){sb.channel("pos-orders").on("postgres_changes",{event:"*",schema:"public",table:"orders"},()=>loadOrders()).subscribe(s=>{$("connection").textContent=s==="SUBSCRIBED"?"🟢 Live":"🟠 "+s});sb.channel("pos-menu").on("postgres_changes",{event:"*",schema:"public",table:"menu_items"},()=>loadMenu()).subscribe()}
+function clearCart(){cart={};renderCart()}
+async function completeOrder(){await placeOrder()}
+async function addMenu(){let name=prompt("Food item name?");if(!name)return;let category=prompt("Category?","Snacks")||"Other";let price=Number(prompt("Price?","20"));if(!Number.isFinite(price)||price<0)return alert("Invalid price.");let {error}=await sb.from("menu_items").insert({name,category,price});if(error)alert(error.message);else loadMenu()}
+async function printBill(){if(!Object.keys(cart).length)return alert("Add items first.");$("receipt").innerHTML="<h2>Food POS</h2><p>"+new Date().toLocaleString()+"</p>"+Object.entries(cart).map(([id,q])=>{let x=menu.find(a=>a.id==id);return `<p>${x.name} × ${q} — ₹${(x.price*q).toFixed(2)}</p>`}).join("")+"<hr><h3>Total: ₹"+cartTotal().toFixed(2)+"</h3><p>Payment: "+$("payment").value+"</p>";window.print()}
+boot();
+</script></body></html>
